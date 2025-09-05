@@ -7,6 +7,12 @@ Problem 1: 单无人机对单导弹的烟幕遮蔽计算（可复现数值 & 可
 import math
 import numpy as np
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+# Matplotlib 中文显示设置
+plt.rcParams['font.sans-serif'] = ['SimHei']  # 指定默认字体
+plt.rcParams['axes.unicode_minus'] = False  # 解决保存图像是负号'-'显示为方块的问题
 
 # -----------------------------
 # 1) 题设常量与几何/运动模型
@@ -227,10 +233,31 @@ if __name__ == "__main__":
     print(f"z=0   总时长 ≈ {d_low:.3f} s；z=10  总时长 ≈ {d_top:.3f} s")
     print()
 
-    # ---- (B) 33 点离散对比（可选）
+    # ---- (B) 33点离散计算与分析
     do_discrete = True
     if do_discrete:
         Tset = target_points_33()
+        durations = []
+        print("\n=== 计算33个离散点的精确遮蔽时长 ===")
+        # 为了节省时间，这里的网格可以粗一些，因为最终依赖二分法细化
+        for i, Ti in enumerate(Tset):
+            _, dur, _ = intervals_with_refine(Ti, t0, t1, R, N=2001)
+            durations.append((Ti, dur))
+            # 打印前5个和最后一个点的时长作为参考
+            if i < 5 or i == len(Tset) - 1:
+                print(f"点 {i+1:>2d} {np.round(Ti, 2)} -> 时长: {dur:.3f} s")
+
+        # 保存到文件
+        output_filename = "p1_discrete_durations.txt"
+        with open(output_filename, "w", encoding="utf-8") as f:
+            f.write("点索引, X, Y, Z, 遮蔽时长(s)\n")
+            # 写入所有33个点
+            for i, (point, dur) in enumerate(durations):
+                f.write(f"{i+1}, {point[0]:.1f}, {point[1]:.1f}, {point[2]:.1f}, {dur:.4f}\n")
+        print(f"\n所有33个点的遮蔽时长已保存到: {output_filename}")
+        print()
+
+        # ---- (C) 离散点分析（沿用之前逻辑）
         # 逐点的掩码
         masks = []
         for Ti in Tset:
@@ -250,7 +277,7 @@ if __name__ == "__main__":
         I_thr = find_intervals(thr_mask, t_grid)
         dur_thr = sum(b-a for a,b in I_thr)
 
-        print("=== 33点离散对比 ===")
+        print("=== 33点离散对比分析 ===")
         print(f"全部遮蔽(交集) 总时长 ≈ {dur_all:.3f} s，区间：{I_all}")
         print(f"覆盖率≥{int(p*100)}% 总时长 ≈ {dur_thr:.3f} s，区间：{I_thr}")
         print("（一般会看到与质点近似的结果非常接近，差在几十毫秒量级）")
@@ -262,21 +289,21 @@ if __name__ == "__main__":
 
     # (V1) 时间域判据图：d(t) vs R，叠加 lam*(t) 与有效遮蔽阴影
     fig1, ax1 = plt.subplots(figsize=(9, 4.5))
-    ax1.plot(t_grid, d_arr, label="distance d(t) from cloud center to LOS segment")
-    ax1.axhline(R, linestyle="--", label="R = 10 m")
+    ax1.plot(t_grid, d_arr, label="云团中心到视线段距离 d(t)")
+    ax1.axhline(R, linestyle="--", color="r", label="有效遮蔽半径 R = 10 m")
     # 有效遮蔽阴影
     for (a, b) in I_center:
-        ax1.axvspan(a, b, alpha=0.2, label="effective cover" if a==I_center[0][0] else None)
-    ax1.set_xlabel("time t (s)")
-    ax1.set_ylabel("distance d(t) (m)")
-    ax1.set_title("Cover condition over time (point target at T_c)")
+        ax1.axvspan(a, b, color="orange", alpha=0.2, label="有效遮蔽" if a==I_center[0][0] else None)
+    ax1.set_xlabel("时间 t (s)")
+    ax1.set_ylabel("距离 d(t) (m)")
+    ax1.set_title("遮蔽条件随时间变化（质点目标 T_c）")
     ax1.grid(True, linestyle=":", alpha=0.6)
 
     # 第二纵轴画 lambda*(t)，并高亮 [0,1]
     ax2 = ax1.twinx()
-    ax2.plot(t_grid, np.clip(lam_arr, -0.1, 1.1), alpha=0.6, label="lambda*(t)")
-    ax2.axhspan(0,1, color="grey", alpha=0.08, label="0 ≤ lambda* ≤ 1")
-    ax2.set_ylabel("lambda*(t)")
+    ax2.plot(t_grid, np.clip(lam_arr, -0.1, 1.1), "g-.", alpha=0.6, label="视线段参数 λ*(t)")
+    ax2.axhspan(0,1, color="grey", alpha=0.1, label="0 ≤ λ* ≤ 1")
+    ax2.set_ylabel("λ*(t)")
 
     # 合并图例
     lines1, labels1 = ax1.get_legend_handles_labels()
@@ -284,41 +311,45 @@ if __name__ == "__main__":
     ax1.legend(lines1+lines2, labels1+labels2, loc="upper right", fontsize=9)
     fig1.tight_layout()
 
-    # (V2) 俯视 XY 快照：取中点时刻 t_mid
-    if I_center:
-        t_mid = 0.5*(I_center[0][0] + I_center[0][1])
-    else:
-        t_mid = t_explode + 10.0
+    # (V2) 目标三维表面与离散点
+    if do_discrete:
+        fig2 = plt.figure(figsize=(8, 8))
+        ax3d = fig2.add_subplot(111, projection='3d')
 
-    Mc = M_pos(t_mid)
-    Tc = T_center
-    Cc = C_pos(t_mid)
+        # 绘制圆柱体表面
+        rad = 7.0
+        cx, cy = 0.0, 200.0
+        z_bottom, z_top = 0.0, 10.0
+        theta = np.linspace(0, 2 * np.pi, 100)
+        z_wall = np.linspace(z_bottom, z_top, 2)
+        theta_grid, z_grid = np.meshgrid(theta, z_wall)
+        x_grid = cx + rad * np.cos(theta_grid)
+        y_grid = cy + rad * np.sin(theta_grid)
+        ax3d.plot_surface(x_grid, y_grid, z_grid, alpha=0.2, color='c', rstride=5, cstride=5, linewidth=0.1, edgecolors='k')
 
-    fig2, ax = plt.subplots(figsize=(6, 6))
-    ax.scatter([Mc[0]],[Mc[1]], marker="^", s=80, label="Missile")
-    ax.scatter([Tc[0]],[Tc[1]], marker="o", s=60, label="Target (center)")
-    ax.scatter([x_e],[y_e], marker="x", s=80, label="Cloud center proj.")
+        # 绘制顶盖和底盖
+        theta_circle = np.linspace(0, 2 * np.pi, 100)
+        x_circle = cx + rad * np.cos(theta_circle)
+        y_circle = cy + rad * np.sin(theta_circle)
+        verts_top = [list(zip(x_circle, y_circle, np.full_like(x_circle, z_top)))]
+        verts_bottom = [list(zip(x_circle, y_circle, np.full_like(x_circle, z_bottom)))]
+        ax3d.add_collection3d(Poly3DCollection(verts_top, facecolors='cyan', alpha=0.3))
+        ax3d.add_collection3d(Poly3DCollection(verts_bottom, facecolors='cyan', alpha=0.3))
 
-    # 视线段投影（导弹->目标中心）
-    ax.plot([Mc[0], Tc[0]], [Mc[1], Tc[1]], linestyle="-", alpha=0.7, label="LOS proj.")
+        # 绘制离散点
+        Tset = target_points_33()
+        ax3d.scatter(Tset[:,0], Tset[:,1], Tset[:,2], c='r', s=25, label='离散采样点', depthshade=True)
 
-    # 云团在XY的投影圆（半径 R）
-    th = np.linspace(0, 2*np.pi, 256)
-    ax.plot(x_e + R*np.cos(th), y_e + R*np.sin(th), linestyle="--", alpha=0.7, label="cloud R=10m (XY)")
-
-    ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel("X (m)")
-    ax.set_ylabel("Y (m)")
-    ax.set_title(f"Top-down snapshot at t = {t_mid:.3f} s")
-    ax.grid(True, linestyle=":", alpha=0.6)
-
-    # 取个合适的显示范围
-    xs = [Mc[0], Tc[0], x_e]; ys=[Mc[1], Tc[1], y_e]
-    ax.set_xlim(min(xs)-2000, max(xs)+2000)
-    ax.set_ylim(min(ys)-2000, max(ys)+2000)
-
-    ax.legend(loc="upper right")
-    fig2.tight_layout()
+        ax3d.set_xlabel('X (m)')
+        ax3d.set_ylabel('Y (m)')
+        ax3d.set_zlabel('Z (m)')
+        ax3d.set_title('目标圆柱体表面及离散采样点')
+        ax3d.legend()
+        
+        # 设置一个好看的视角和坐标轴比例
+        ax3d.view_init(elev=20, azim=-120)
+        ax3d.set_box_aspect((np.ptp(Tset[:,0]), np.ptp(Tset[:,1]), np.ptp(Tset[:,2]))) # 视觉比例
+        fig2.tight_layout()
 
     # 打印关键结论
     print("=== 结论（问题 1） ===")

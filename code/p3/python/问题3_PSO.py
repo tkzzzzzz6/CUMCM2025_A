@@ -10,7 +10,11 @@ import numpy as np
 import time
 import random
 import copy
- 
+import matplotlib.pyplot as plt
+
+# Matplotlib 中文显示设置
+plt.rcParams['font.sans-serif'] = ['SimHei']  # 指定默认字体
+plt.rcParams['axes.unicode_minus'] = False  # 解决保存图像是负号'-'显示为方块的问题
 
 # -----------------------------
 # 1) 物理参数
@@ -162,7 +166,7 @@ def run_pso_optimization():
 
     # PSO 超参数
     SWARM_SIZE = 80
-    ITERATIONS = 150
+    ITERATIONS = 100
     W = 0.6           # 惯性权重
     C1 = 1.6          # 个体学习因子
     C2 = 1.6          # 群体学习因子
@@ -181,6 +185,7 @@ def run_pso_optimization():
 
     start_time = time.time()
     best_at_10 = None; best_at_10_fit = -1.0
+    gen_best_list = []  # 仅记录每轮的本代最佳(低保真)
 
     for it in range(ITERATIONS):
         # 速度与位置更新
@@ -194,6 +199,7 @@ def run_pso_optimization():
 
         # 评估 (低保真)
         fits = np.array([get_fitness(list(p), fidelity='low') for p in positions])
+        gen_best_list.append(float(np.max(fits)))
 
         # 个体最优更新
         improved = fits > pbest_fit
@@ -250,6 +256,23 @@ def run_pso_optimization():
             f.write("最优无人机飞行方向(theta_FY1)：{:.3f} 度\n".format(angle_g))
             f.write("最优无人机飞行速度(V_FY1)：{:.2f} 米/秒\n".format(speed_g))
             f.write("\n[总体时最优的高保真遮蔽时长：{:.3f}s]\n".format(gbest_fit))
+
+        # 绘制并保存进度图（仅展示本代最长）
+        try:
+            plt.figure(figsize=(10,4.5))
+            x = list(range(1, len(gen_best_list)+1))
+            plt.plot(x, gen_best_list, 'o-', linewidth=1.8, markersize=4, color='#1f77b4', alpha=0.9, label='本代最长', zorder=2)
+            plt.xlabel('代数')
+            plt.ylabel('遮蔽时间 (s)')
+            plt.title('PSO 优化进度')
+            plt.legend()
+            plt.grid(alpha=0.3)
+            plt.tight_layout()
+            fig_path = os.path.join(out_dir, 'pso_progress.png')
+            plt.savefig(fig_path, dpi=150)
+            plt.close()
+        except Exception as e:
+            print("保存进度图失败:", e)
     except Exception as e:
         print("写入输出摘要失败:", e)
 

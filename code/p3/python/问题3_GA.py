@@ -156,7 +156,25 @@ PARAM_BOUNDS = [
 ]
 
 def check_bounds(val, bounds): return max(bounds[0], min(bounds[1], val))
-def create_individual(): return [random.uniform(b[0], b[1]) for b in PARAM_BOUNDS]
+def _sample_biased_angle():
+    """优先在[0°,20°]∪[340°,360°]采样角度，提升小偏角探索概率。"""
+    if random.random() < 0.7:
+        # 70% 概率采样小偏角区
+        if random.random() < 0.5:
+            return random.uniform(0.0, 20.0)
+        else:
+            return random.uniform(340.0, 360.0)
+    # 30% 保留全局探索
+    return random.uniform(0.0, 360.0)
+
+def create_individual():
+    ind = []
+    for i, b in enumerate(PARAM_BOUNDS):
+        if i == 0:  # 角度
+            ind.append(_sample_biased_angle())
+        else:
+            ind.append(random.uniform(b[0], b[1]))
+    return ind
 def crossover_sbx(p1,p2): c1,c2=copy.deepcopy(p1),copy.deepcopy(p2); [crossover_sbx_gene(c1,c2,i) for i in range(len(p1))]; return c1,c2
 def crossover_sbx_gene(c1,c2,i):
     if random.random()>0.5: return
@@ -176,6 +194,11 @@ def mutate_polynomial_gene(ind,i):
     # i 发生改变时，确保 dt_r2、dt_r3 不小于 1.0
     if i in (4,6):
         ind[i] = max(ind[i], 1.0)
+    # 角度方向的引导性探索：向小偏角区轻微吸引
+    if i == 0:
+        if random.random() < 0.3:  # 30% 概率朝 0° 或 360° 拉近一点
+            target = 0.0 if random.random() < 0.5 else 360.0
+            ind[i] = check_bounds( ind[i] + 0.1*(target - ind[i]), PARAM_BOUNDS[i] )
 
 def run_ga_optimization():
     print("=== 开始执行三枚烟幕弹协同策略优化 ===")

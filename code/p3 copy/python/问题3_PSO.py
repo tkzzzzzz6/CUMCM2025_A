@@ -11,7 +11,6 @@ import time
 import random
 import copy
 import matplotlib.pyplot as plt
-import csv
 
 # Matplotlib 中文显示设置
 plt.rcParams['font.sans-serif'] = ['SimHei']  # 指定默认字体
@@ -324,47 +323,6 @@ def format_and_output_results(best_params):
     for i in range(3):
         print("第{}枚：飞行时间{:.3f}s，引信时间{:.3f}s.".format(i+1, [t_r1, t_r1+dt_r2, t_r1+dt_r2+dt_r3][i] - (0 if i==0 else [t_r1, t_r1+dt_r2, t_r1+dt_r2+dt_r3][i-1]), [t_f1, t_f2, t_f3][i]))
         print("[独立有效时长：{:.3f}s]".format(indiv_durations[i]))
-
-    # 5. 写入附件一 result1.csv（模板格式）
-    try:
-        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-        attach_dir = os.path.join(base_dir, '附件')
-        os.makedirs(attach_dir, exist_ok=True)
-        csv_path = os.path.join(attach_dir, 'result1.csv')
-
-        headers = [
-            '无人机运动方向', '无人机运动速度 (m/s)', '烟幕干扰弹编号',
-            '烟幕干扰弹投放点的x坐标 (m)', '烟幕干扰弹投放点的y坐标 (m)', '烟幕干扰弹投放点的z坐标 (m)',
-            '烟幕干扰弹起爆点的x坐标 (m)', '烟幕干扰弹起爆点的y坐标 (m)', '烟幕干扰弹起爆点的z坐标 (m)',
-            '有效干扰时长 (s)'
-        ]
-
-        rows = []
-        for i in range(3):
-            p = bombs_data_precise[i]['P_rel']
-            e = bombs_data_precise[i]['E']
-            rows.append([
-                round(angle, 3) if i == 0 else '',
-                round(speed, 2) if i == 0 else '',
-                i + 1,
-                round(float(p[0]), 3), round(float(p[1]), 3), round(float(p[2]), 3),
-                round(float(e[0]), 3), round(float(e[1]), 3), round(float(e[2]), 3),
-                round(float(total_duration_precise), 4) if i == 0 else ''
-            ])
-
-        # 追加说明行
-        note_row = ['注：以x轴为正向，逆时针方向为正，取值0~360（度）。'] + [''] * (len(headers) - 1)
-
-        with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
-            writer = csv.writer(f)
-            writer.writerow(headers)
-            for r in rows:
-                writer.writerow(r)
-            writer.writerow([''] * len(headers))
-            writer.writerow(note_row)
-        print("已写入附件: {}".format(csv_path))
-    except Exception as e:
-        print("写入附件 result1.csv 失败:", e)
 
 if __name__ == "__main__":
     best_params = run_pso_optimization()

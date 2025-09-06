@@ -11,7 +11,6 @@ import time
 import random
 import copy
 import matplotlib.pyplot as plt
-import csv
 
 # Matplotlib 中文显示设置
 plt.rcParams['font.sans-serif'] = ['SimHei']  # 指定默认字体
@@ -119,6 +118,7 @@ def calculate_individual_durations(bombs_data, N_grid=5001):
     使用与联合计算相同的时间窗与判定标准，便于对比。
     """
     min_exp_time = min(b['t_exp'] for b in bombs_data)
+    # 以各弹 t_exp+EFFECTIVE_TIME 的最大值作为右端
     t1_cap = max(b['t_exp'] + EFFECTIVE_TIME for b in bombs_data)
     t0, t1 = min_exp_time, t1_cap
     t_grid = np.linspace(t0, t1, N_grid)
@@ -136,105 +136,156 @@ def calculate_individual_durations(bombs_data, N_grid=5001):
         durations.append(float(np.sum(mask) * dt))
     return durations
 
-#############################################
-# 3) 粒子群算法 (PSO) 模块
-#############################################
-
+# ---------------------------------------------
+# 3) 遗传算法 (Genetic Algorithm) 模块
+# ---------------------------------------------
+POP_SIZE = 120
+GENERATIONS = 100 #迭代次数
+CXPB, MUTPB = 0.9, 0.2
+ELITE_COUNT = 2
+ETA = 20
 PARAM_BOUNDS = [
     (0, 360),      # 角度
     (70, 140),     # 速度 (题设约束)
     (0.0, 12.0),   # t_r1
     (0.005, 12.0), # t_f1
-    (1.0, 12.0),   # dt_r2 >= 1s
+    (1.0, 12.0),   # dt_r2 >= 1s (题设约束)
     (0.005, 12.0), # t_f2
-    (1.0, 12.0),   # dt_r3 >= 1s
+    (1.0, 12.0),   # dt_r3 >= 1s (题设约束)
     (0.005, 12.0), # t_f3
 ]
 
-def check_bounds(val, bounds):
-    return max(bounds[0], min(bounds[1], val))
+def check_bounds(val, bounds): return max(bounds[0], min(bounds[1], val))
+def _sample_biased_angle():
+    """优先在[0°,20°]∪[340°,360°]采样角度，提升小偏角探索概率。"""
+    if random.random() < 0.7:
+        # 70% 概率采样小偏角区
+        if random.random() < 0.5:
+            return random.uniform(0.0, 20.0)
+        else:
+            return random.uniform(340.0, 360.0)
+    # 30% 保留全局探索
+    return random.uniform(0.0, 360.0)
 
-def project_params(params):
-    q = [check_bounds(v, b) for v, b in zip(params, PARAM_BOUNDS)]
-    q[0] = q[0] % 360.0
-    q[4] = max(q[4], 1.0)
-    q[6] = max(q[6], 1.0)
-    return q
+def create_individual():
+    ind = []
+    for i, b in enumerate(PARAM_BOUNDS):
+        if i == 0:  # 角度
+            ind.append(_sample_biased_angle())
+        else:
+            ind.append(random.uniform(b[0], b[1]))
+    return ind
+def crossover_sbx(p1,p2): c1,c2=copy.deepcopy(p1),copy.deepcopy(p2); [crossover_sbx_gene(c1,c2,i) for i in range(len(p1))]; return c1,c2
+def crossover_sbx_gene(c1,c2,i):
+    if random.random()>0.5: return
+    y1,y2,(yl,yu)=min(c1[i],c2[i]),max(c1[i],c2[i]),PARAM_BOUNDS[i]; u=random.random()
+    if y2-y1>1e-6:
+        beta=1.0+(2.0*(y1-yl)/(y2-y1)); alpha=2.0-beta**(-(ETA+1.0)); beta_q=(u*alpha)**(1.0/(ETA+1.0)) if u<=1.0/alpha else (1.0/(2.0-u*alpha))**(1.0/(ETA+1.0)); c1[i]=0.5*((y1+y2)-beta_q*(y2-y1))
+        beta=1.0+(2.0*(yu-y2)/(y2-y1)); alpha=2.0-beta**(-(ETA+1.0)); beta_q=(u*alpha)**(1.0/(ETA+1.0)) if u<=1.0/alpha else (1.0/(2.0-u*alpha))**(1.0/(ETA+1.0)); c2[i]=0.5*((y1+y2)+beta_q*(y2-y1))
+    c1[i],c2[i]=check_bounds(c1[i],PARAM_BOUNDS[i]),check_bounds(c2[i],PARAM_BOUNDS[i])
+def mutate_polynomial(ind): [mutate_polynomial_gene(ind,i) for i in range(len(ind))]; return ind
+def mutate_polynomial_gene(ind,i):
+    if random.random()<MUTPB:
+        yl,yu=PARAM_BOUNDS[i]; delta1,delta2=(ind[i]-yl)/(yu-yl),(yu-ind[i])/(yu-yl); u,mut_pow=random.random(),1.0/(ETA+1.0)
+        if u<0.5: val=2.0*u+(1.0-2.0*u)*(1.0-delta1)**(ETA+1.0); delta_q=val**mut_pow-1.0
+        else: val=2.0*(1.0-u)+2.0*(u-0.5)*(1.0-delta2)**(ETA+1.0); delta_q=1.0-val**mut_pow
+        ind[i]+=delta_q*(yu-yl); ind[i]=check_bounds(ind[i],PARAM_BOUNDS[i])
+    # 变异后再次校验“投放间隔≥1s”的耦合约束
+    # i 发生改变时，确保 dt_r2、dt_r3 不小于 1.0
+    if i in (4,6):
+        ind[i] = max(ind[i], 1.0)
+    # 角度方向的引导性探索：向小偏角区轻微吸引
+    if i == 0:
+        if random.random() < 0.3:  # 30% 概率朝 0° 或 360° 拉近一点
+            target = 0.0 if random.random() < 0.5 else 360.0
+            ind[i] = check_bounds( ind[i] + 0.1*(target - ind[i]), PARAM_BOUNDS[i] )
 
-def run_pso_optimization():
-    print("=== 开始执行三枚烟幕弹协同策略优化 (PSO) ===")
+def run_ga_optimization():
+    print("=== 开始执行三枚烟幕弹协同策略优化 ===")
     random.seed(42); np.random.seed(42)
-
-    # PSO 超参数
-    SWARM_SIZE = 80
-    ITERATIONS = 100
-    W = 0.6           # 惯性权重
-    C1 = 1.6          # 个体学习因子
-    C2 = 1.6          # 群体学习因子
-
-    dim = len(PARAM_BOUNDS)
-    # 初始化粒子位置/速度
-    positions = np.array([[random.uniform(b[0], b[1]) for b in PARAM_BOUNDS] for _ in range(SWARM_SIZE)], dtype=float)
-    velocities = np.zeros((SWARM_SIZE, dim), dtype=float)
-
-    # 个体最优与全局最优
-    pbest = positions.copy()
-    pbest_fit = np.array([get_fitness(project_params(list(p)), fidelity='low') for p in pbest])
-    g_idx = int(np.argmax(pbest_fit))
-    gbest = pbest[g_idx].copy()
-    gbest_fit = float(pbest_fit[g_idx])
-
+    population = [create_individual() for _ in range(POP_SIZE)]
+    best_ind_overall, best_fitness_overall = None, -1.0
     start_time = time.time()
-    best_at_10 = None; best_at_10_fit = -1.0
-    gen_best_list = []  # 仅记录每轮的本代最佳(低保真)
+    best_at_10, best_at_10_fit = None, -1.0
+    gen_best_list, hist_best_list = [], []
 
-    for it in range(ITERATIONS):
-        # 速度与位置更新
-        r1 = np.random.rand(SWARM_SIZE, dim)
-        r2 = np.random.rand(SWARM_SIZE, dim)
-        velocities = W*velocities + C1*r1*(pbest - positions) + C2*r2*(gbest - positions)
+    for gen in range(GENERATIONS):
+        # 先用低保真评估整个种群
+        fitnesses = [get_fitness(ind, fidelity='low') for ind in population]
+        elite_indices = sorted(range(len(fitnesses)), key=lambda k: fitnesses[k], reverse=True)[:ELITE_COUNT]
+        elites = [population[i] for i in elite_indices]
 
-        positions = positions + velocities
-        # 约束投影
-        positions = np.array([project_params(list(p)) for p in positions], dtype=float)
+        # 对前若干名做高保真校正
+        top_k = 10 if len(population) >= 50 else max(2, len(population)//5)
+        top_indices = sorted(range(len(fitnesses)), key=lambda k: fitnesses[k], reverse=True)[:top_k]
+        for idx in top_indices:
+            fitnesses[idx] = get_fitness(population[idx], fidelity='high')
+        elite_indices = sorted(range(len(fitnesses)), key=lambda k: fitnesses[k], reverse=True)[:ELITE_COUNT]
+        elites = [population[i] for i in elite_indices]
 
-        # 评估 (低保真)
-        fits = np.array([get_fitness(list(p), fidelity='low') for p in positions])
-        gen_best_list.append(float(np.max(fits)))
-
-        # 个体最优更新
-        improved = fits > pbest_fit
-        pbest[improved] = positions[improved]
-        pbest_fit[improved] = fits[improved]
-
-        # 全局最优更新 (高保真对顶)
-        g_idx = int(np.argmax(pbest_fit))
-        gbest_candidate = pbest[g_idx].copy()
-        gbest_candidate_fit = get_fitness(list(gbest_candidate), fidelity='high')
-        if gbest_candidate_fit > gbest_fit:
-            gbest, gbest_fit = gbest_candidate, gbest_candidate_fit
-            angle, speed, t_r1, t_f1, dt_r2, t_f2, dt_r3, t_f3 = gbest
+        if fitnesses[elite_indices[0]] > best_fitness_overall:
+            best_fitness_overall = fitnesses[elite_indices[0]]
+            best_ind_overall = copy.deepcopy(elites[0])
+            angle, speed, t_r1, t_f1, dt_r2, t_f2, dt_r3, t_f3 = best_ind_overall
             print("[刷新历史遮挡最长]")
             print("无人机飞行速度(V_FY1)：{:.2f} 米/秒".format(speed))
             print("无人机飞行方向(theta_FY1)：{:.2f} 度".format(angle))
             print("投放前飞行时间(t_fly)：{:.2f} 秒".format(t_r1))
             print("烟幕弹引信时间(t_fuse)：{:.2f} 秒".format(t_f1))
 
-        # 10s 快照
+        # 到达10秒快照（仅记录一次），用高保真评估对齐
         if best_at_10 is None and (time.time() - start_time) >= 10.0:
-            best_at_10 = gbest.copy(); best_at_10_fit = gbest_fit
+            best_at_10 = copy.deepcopy(best_ind_overall) if best_ind_overall is not None else None
+            if best_at_10 is not None:
+                best_at_10_fit = get_fitness(best_at_10, fidelity='high')
 
-        print(f"迭代 {it+1:3d}/{ITERATIONS} | 本轮最佳(低保真): {np.max(fits):.3f} s | 历史最佳(高保真): {gbest_fit:.3f} s")
+        gen_best = max(fitnesses)
+        gen_best_list.append(gen_best)
+        if len(hist_best_list) == 0:
+            hist_best_list.append(gen_best)
+        else:
+            hist_best_list.append(max(hist_best_list[-1], gen_best))
+        print(f"代数 {gen+1:3d}/{GENERATIONS} | "f"本代最长遮蔽时间: {gen_best:.3f} s | "f"历史最长: {best_fitness_overall:.3f} s")
 
+        offspring = [copy.deepcopy(e) for e in elites]
+        while len(offspring) < POP_SIZE:
+            # tournament selection (k=3)
+            cand = random.sample(range(POP_SIZE), 3); p1 = max(cand, key=lambda idx: fitnesses[idx])
+            cand = random.sample(range(POP_SIZE), 3); p2 = max(cand, key=lambda idx: fitnesses[idx])
+            p1, p2 = population[p1], population[p2]
+            if random.random()<CXPB: c1,c2=crossover_sbx(p1,p2)
+            else: c1,c2=copy.deepcopy(p1),copy.deepcopy(p2)
+            offspring.append(mutate_polynomial(c1));
+            if len(offspring)<POP_SIZE: offspring.append(mutate_polynomial(c2))
+        population = offspring
+
+    print(f"\n优化完成，耗时: {time.time() - start_time:.2f} s")
+    # 局部爬山细化（高保真评价）
+    def refine(ind, steps=120, sigma=[2, 3, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2]):
+        best = copy.deepcopy(ind); best_fit = get_fitness(best, fidelity='high')
+        for _ in range(steps):
+            trial = [check_bounds(v + np.random.normal(0, s), b) for v, s, b in zip(best, sigma, PARAM_BOUNDS)]
+            f = get_fitness(trial, fidelity='high')
+            if f > best_fit:
+                best, best_fit = trial, f
+        return best
+
+    best_ind_overall = refine(best_ind_overall)
     total_time = time.time() - start_time
-    if best_at_10 is None:
-        best_at_10 = gbest.copy(); best_at_10_fit = gbest_fit
 
-    # 输出摘要
+    # 如果算法总时长<10s，使用最终最优作为10s快照
+    if best_at_10 is None:
+        best_at_10 = copy.deepcopy(best_ind_overall)
+        best_at_10_fit = get_fitness(best_at_10, fidelity='high')
+
+    # 计算总体最优的高保真时长
+    best_final_fit = get_fitness(best_ind_overall, fidelity='high')
+
+    # 写入输出文本
     try:
-        out_dir = os.path.join(os.path.dirname(__file__), 'output_PSO')
+        out_dir = os.path.join(os.path.dirname(__file__), 'output_GA')
         os.makedirs(out_dir, exist_ok=True)
-        out_path = os.path.join(out_dir, 'summary_p3_PSO.txt')
+        out_path = os.path.join(out_dir, 'summary_p3_GA.txt')
         with open(out_path, 'w', encoding='utf-8') as f:
             f.write("算法总体运行时间: {:.2f} s\n".format(total_time))
             f.write("\n[10秒时刻的最优策略]\n")
@@ -251,33 +302,37 @@ def run_pso_optimization():
                 ))
             f.write("[10秒时最优的高保真遮蔽时长：{:.3f}s]\n".format(best_at_10_fit))
 
-            # 写入总体最优策略（全程高保真最佳）
             f.write("\n[总体最优策略]\n")
-            angle_g, speed_g, t_r1_g, t_f1_g, dt_r2_g, t_f2_g, dt_r3_g, t_f3_g = gbest
-            f.write("最优无人机飞行方向(theta_FY1)：{:.3f} 度\n".format(angle_g))
-            f.write("最优无人机飞行速度(V_FY1)：{:.2f} 米/秒\n".format(speed_g))
-            f.write("\n[总体时最优的高保真遮蔽时长：{:.3f}s]\n".format(gbest_fit))
+            angle_f, speed_f, t_r1f, t_f1f, dt_r2f, t_f2f, dt_r3f, t_f3f = best_ind_overall
+            f.write("最优无人机飞行方向(theta_FY1)：{:.3f} 度\n".format(angle_f))
+            f.write("最优无人机飞行速度(V_FY1)：{:.2f} 米/秒\n".format(speed_f))
+            t_releases_f = [t_r1f, t_r1f + dt_r2f, t_r1f + dt_r2f + dt_r3f]
+            t_fuzes_f = [t_f1f, t_f2f, t_f3f]
+            for i in range(3):
+                f.write("第{}枚：飞行时间{:.3f}s，引信时间{:.3f}s\n".format(
+                    i+1,
+                    t_releases_f[i] - (0 if i==0 else t_releases_f[i-1]),
+                    t_fuzes_f[i]
+                ))
+            f.write("[总体时最优的高保真遮蔽时长：{:.3f}s]\n".format(best_final_fit))
 
         # 绘制并保存进度图（仅展示本代最长）
-        try:
-            plt.figure(figsize=(10,4.5))
-            x = list(range(1, len(gen_best_list)+1))
-            plt.plot(x, gen_best_list, 'o-', linewidth=1.8, markersize=4, color='#1f77b4', alpha=0.9, label='本代最长', zorder=2)
-            plt.xlabel('代数')
-            plt.ylabel('遮蔽时间 (s)')
-            plt.title('PSO 优化进度')
-            plt.legend()
-            plt.grid(alpha=0.3)
-            plt.tight_layout()
-            fig_path = os.path.join(out_dir, 'pso_progress.png')
-            plt.savefig(fig_path, dpi=150)
-            plt.close()
-        except Exception as e:
-            print("保存进度图失败:", e)
+        plt.figure(figsize=(10,4.5))
+        x = list(range(1, len(gen_best_list)+1))
+        plt.plot(x, gen_best_list, 'o-', linewidth=1.8, markersize=4, color='#1f77b4', alpha=0.9, label='本代最长', zorder=2)
+        plt.xlabel('代数')
+        plt.ylabel('遮蔽时间 (s)')
+        plt.title('GA 优化进度')
+        plt.legend()
+        plt.grid(alpha=0.3)
+        plt.tight_layout()
+        fig_path = os.path.join(out_dir, 'ga_progress.png')
+        plt.savefig(fig_path, dpi=150)
+        plt.close()
     except Exception as e:
         print("写入输出摘要失败:", e)
 
-    return list(gbest)
+    return best_ind_overall
 
 # -----------------------------
 # 4) 主流程与格式化输出
@@ -325,48 +380,7 @@ def format_and_output_results(best_params):
         print("第{}枚：飞行时间{:.3f}s，引信时间{:.3f}s.".format(i+1, [t_r1, t_r1+dt_r2, t_r1+dt_r2+dt_r3][i] - (0 if i==0 else [t_r1, t_r1+dt_r2, t_r1+dt_r2+dt_r3][i-1]), [t_f1, t_f2, t_f3][i]))
         print("[独立有效时长：{:.3f}s]".format(indiv_durations[i]))
 
-    # 5. 写入附件一 result1.csv（模板格式）
-    try:
-        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-        attach_dir = os.path.join(base_dir, '附件')
-        os.makedirs(attach_dir, exist_ok=True)
-        csv_path = os.path.join(attach_dir, 'result1.csv')
-
-        headers = [
-            '无人机运动方向', '无人机运动速度 (m/s)', '烟幕干扰弹编号',
-            '烟幕干扰弹投放点的x坐标 (m)', '烟幕干扰弹投放点的y坐标 (m)', '烟幕干扰弹投放点的z坐标 (m)',
-            '烟幕干扰弹起爆点的x坐标 (m)', '烟幕干扰弹起爆点的y坐标 (m)', '烟幕干扰弹起爆点的z坐标 (m)',
-            '有效干扰时长 (s)'
-        ]
-
-        rows = []
-        for i in range(3):
-            p = bombs_data_precise[i]['P_rel']
-            e = bombs_data_precise[i]['E']
-            rows.append([
-                round(angle, 3) if i == 0 else '',
-                round(speed, 2) if i == 0 else '',
-                i + 1,
-                round(float(p[0]), 3), round(float(p[1]), 3), round(float(p[2]), 3),
-                round(float(e[0]), 3), round(float(e[1]), 3), round(float(e[2]), 3),
-                round(float(total_duration_precise), 4) if i == 0 else ''
-            ])
-
-        # 追加说明行
-        note_row = ['注：以x轴为正向，逆时针方向为正，取值0~360（度）。'] + [''] * (len(headers) - 1)
-
-        with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
-            writer = csv.writer(f)
-            writer.writerow(headers)
-            for r in rows:
-                writer.writerow(r)
-            writer.writerow([''] * len(headers))
-            writer.writerow(note_row)
-        print("已写入附件: {}".format(csv_path))
-    except Exception as e:
-        print("写入附件 result1.csv 失败:", e)
-
 if __name__ == "__main__":
-    best_params = run_pso_optimization()
+    best_params = run_ga_optimization()
     if best_params:
         format_and_output_results(best_params)

@@ -45,7 +45,12 @@ use_multipoint = true;
 p_thresh      = 1;     % 覆盖比例阈值（例如 90% 点被遮蔽即计入）
 pts_cyl       = cylinder_points();
 
+% 运行开关：默认直接进行“问题3（多弹组合）”，关闭问题2单弹优化
+run_Q2 = false;   % 若想复现实验问题2，设为 true
+run_Q3 = true;    % 问题3：三枚烟幕弹组合优化
+
 %% ===================== 粗搜索（可修改密度以控时） =====================
+if run_Q2
 % 规则网格（若启用）或随机采样（默认）
 if ~use_random_coarse
     theta_grid = linspace(theta_lo, theta_hi, N_theta);
@@ -251,10 +256,13 @@ else
     fprintf('【遮蔽起止】 [%.3f s, %.3f s]\n', merged(1,1), merged(end,2));
 end
 
+end  % run_Q2
+
 %% ===================== 问题3：三枚烟幕弹组合优化（候选+选择） =====================
 % 说明：固定 (theta,v) 生成候选遮蔽区间，再在同一航迹上选择至多3段
 %       满足释放间隔 >= 1 s，最大化并集时长。结果写入 附件/result1.xlsx。
 
+if run_Q3
 fprintf('\n=== 问题3：开始多弹组合搜索（候选+选择） ===\n');
 
 % 外层搜索网格（可按需加密）
@@ -269,13 +277,20 @@ dt_eval = 0.01;                            % 候选评估时间步
 TopC = 60;                                  % 每条航迹保留的候选上限
 best3 = struct('total',-inf);
 
+outer_total = numel(theta_grid3)*numel(v_grid3);
+outer_idx = 0;
 for th = theta_grid3
     phi = phi0 + deg2rad(th); hxy = [cos(phi), sin(phi)];
     for v3 = v_grid3
+        outer_idx = outer_idx + 1;
+        fprintf('外层 %3d/%3d ：theta=%6.2f deg, v=%5.1f m/s\n', outer_idx, outer_total, th, v3); drawnow limitrate;
         % 生成候选
         C = [];  % 每行: [a b w tr xe ye ze te tf]
+        n_te = numel(te_lo:dt_te:te_hi); n_tf = numel(tf_lo:dt_tf:tf_hi);
+        inner_total = n_te * n_tf; inner_idx = 0; last_print = -1;
         for tei = te_lo:dt_te:te_hi
             for tfi = tf_lo:dt_tf:tf_hi
+                inner_idx = inner_idx + 1;
                 tr_i = tei - tfi; if tr_i < 0, continue; end
                 xe = U0(1) + v3 * tei * hxy(1);
                 ye = U0(2) + v3 * tei * hxy(2);
@@ -292,8 +307,16 @@ for th = theta_grid3
                 [a,b,w] = get_longest_interval(dets.t, logical(dets.mask(:)));
                 if w < 0.2, continue; end
                 C = [C; a, b, w, tr_i, xe, ye, ze, tei, tfi]; %#ok<AGROW>
+
+                % 进度条（每完成 ~5% 打印一次，覆盖同一行）
+                pct = floor(100*inner_idx/inner_total);
+                if pct >= last_print + 5 || inner_idx==inner_total
+                    fprintf('  候选扫描 %6d/%6d  (%3d%%)\r', inner_idx, inner_total, pct);
+                    last_print = pct; drawnow limitrate;
+                end
             end
         end
+        fprintf('\n');
         if isempty(C), continue; end
         % 去重：同一邻域的相似区间仅保留一个（按起爆时刻聚类近似）
         C = sortrows(C, -3);   % 按 w 降序
@@ -387,6 +410,21 @@ else
 end
 
 %% ===================== 本文件内联函数（评分与优化） =====================
+
+end  % run_Q3
+function [a,b,w] = get_longest_interval(t, mask)
+% 从布尔掩码中提取最长的 True 连续区间，返回 [a,b] 及长度 w=b-a。
+    if isempty(mask) || all(~mask)
+        a=0; b=0; w=0; return;
+    end
+    edges = diff([false; mask(:); false]);
+    idxS = find(edges==1);
+    idxE = find(edges==-1) - 1;
+    [~,k] = max(idxE - idxS + 1);
+    a = t(idxS(k));
+    b = t(idxE(k));
+    w = b - a;
+end
 
 function pts = cylinder_points()
 % 生成圆柱体多点（顶/侧/底 + 中心）用于覆盖率判据

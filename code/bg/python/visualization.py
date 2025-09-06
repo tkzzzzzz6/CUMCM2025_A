@@ -66,16 +66,9 @@ ax.scatter(decoy_xy[0], decoy_xy[1], marker='x', s=100, label='诱饵 (0,0)', co
 ax.annotate("诱饵 (0,0,0)", (decoy_xy[0], decoy_xy[1]),
             textcoords="offset points", xytext=(10, 10), color="green")
 
-# 真目标投影圆（俯视）
-theta = np.linspace(0, 2*np.pi, 256)
-xc = real_center_xy[0] + real_r * np.cos(theta)
-yc = real_center_xy[1] + real_r * np.sin(theta)
-# 真目标：橙色圆圈
-ax.plot(xc, yc, linestyle='-', label='真目标投影', color='orange', lw=1.5)
-# 真目标中心点：橙色点
-ax.scatter(real_center_xy[0], real_center_xy[1], marker='o', s=80, color='orange', label='真目标中心')
-ax.annotate(f"真目标中心 (0,200)\n半径={real_r}米, 高度={real_h}米",
-            (real_center_xy[0], real_center_xy[1]),
+# 真目标：只画一个点，不画圆
+ax.scatter(real_center_xy[0], real_center_xy[1], marker='o', s=80, color='orange', label='真目标')
+ax.annotate(f"真目标 (0,200, 高度={real_h}米)", (real_center_xy[0], real_center_xy[1]),
             textcoords="offset points", xytext=(12, 12), color="orange")
 
 # 坐标轴与比例

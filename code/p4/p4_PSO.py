@@ -14,6 +14,7 @@ import math
 import random
 import numpy as np
 import matplotlib.pyplot as plt
+import csv
 
 try:
     from openpyxl import load_workbook, Workbook
@@ -233,7 +234,7 @@ def run_pso_optimization():
     return list(gbest), gbest_fit
 
 # -----------------------------
-# 4) 结果输出（控制台与 Excel）
+# 4) 结果输出（控制台与 CSV）
 # -----------------------------
 def calculate_individual_durations(bombs_data, N_grid=4001):
     min_exp_time = min(b['t_exp'] for b in bombs_data)
@@ -275,52 +276,82 @@ def format_and_output_results(best_params):
     for i in range(3):
         print("FY{} 独立有效遮蔽时长(s): {:.3f}".format(i+1, indiv[i]))
 
-    # 写入 Excel: 附件/result2.xlsx
-    if Workbook is None:
-        print("未安装 openpyxl，跳过 Excel 写入。请在 requirements.txt 中包含 openpyxl 并安装。")
-        return
+    # 写入 CSV: 附件/result2.csv（模板）
+    try:
+        proj_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        csv_path = os.path.join(proj_root, '附件', 'result2.csv')
+        os.makedirs(os.path.dirname(csv_path), exist_ok=True)
 
+        headers = [
+            '无人机编号', '无人机运动方向', '无人机运动速度 (m/s)',
+            '烟幕干扰弹投放点的x坐标 (m)', '烟幕干扰弹投放点的y坐标 (m)', '烟幕干扰弹投放点的z坐标 (m)',
+            '烟幕干扰弹起爆点的x坐标 (m)', '烟幕干扰弹起爆点的y坐标 (m)', '烟幕干扰弹起爆点的z坐标 (m)',
+            '有效干扰时长 (s)', '各无人机有效干扰时长并集时长 (s)'
+        ]
+
+        rows = []
+        triples = _unpack_params(best_params)
+        for i in range(3):
+            pr = bombs_data_precise[i]['P_rel']; e = bombs_data_precise[i]['E']
+            angle, speed, t_rel, t_fuz = triples[i]
+            rows.append([
+                f'FY{i+1}', round(float(angle), 3), round(float(speed), 2),
+                round(float(pr[0]), 3), round(float(pr[1]), 3), round(float(pr[2]), 3),
+                round(float(e[0]), 3), round(float(e[1]), 3), round(float(e[2]), 3),
+                round(float(indiv[i]), 3), round(float(total_duration_precise), 3) if i == 0 else ''
+            ])
+
+        note_row = ['注：以x轴为正向，逆时针方向为正，取值0~360（度）。'] + [''] * (len(headers) - 1)
+
+        with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+            for r in rows:
+                writer.writerow(r)
+            writer.writerow(note_row)
+        print('CSV 已写入:', csv_path)
+    except Exception as e:
+        print('写入 CSV 失败:', e)
+
+    # 写入 CSV: 附件/result2.csv（按模板）
+    import csv
     proj_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-    xlsx_path = os.path.join(proj_root, '附件', 'result2.xlsx')
-    os.makedirs(os.path.dirname(xlsx_path), exist_ok=True)
-    wb = None
-    if os.path.exists(xlsx_path) and load_workbook is not None:
-        try:
-            wb = load_workbook(xlsx_path)
-        except Exception:
-            wb = Workbook()
-    else:
-        wb = Workbook()
+    csv_path = os.path.join(proj_root, '附件', 'result2.csv')
+    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
 
-    ws = wb.active
-    ws.title = ws.title or 'Sheet1'
+    headers = [
+        '无人机编号','无人机运动方向','无人机运动速度 (m/s)',
+        '烟幕干扰弹投放点的x坐标 (m)','烟幕干扰弹投放点的y坐标 (m)','烟幕干扰弹投放点的z坐标 (m)',
+        '烟幕干扰弹起爆点的x坐标 (m)','烟幕干扰弹起爆点的y坐标 (m)','烟幕干扰弹起爆点的z坐标 (m)',
+        '有效干扰时长 (s)','各无人机有效干扰时长并集时长 (s)'
+    ]
 
-    # 写入表头（若空表）
-    if ws.max_row == 1 and ws.max_column == 1 and ws['A1'].value is None:
-        ws.append([
-            'UAV', '航向角(度)', '速度(m/s)', '投放时间(s)', '引信时间(s)',
-            '投放点x(m)', '投放点y(m)', '投放点z(m)',
-            '起爆点x(m)', '起爆点y(m)', '起爆点z(m)'
-        ])
+    # 计算每架无人机的独立有效时长
+    indiv = calculate_individual_durations(bombs_data_precise, N_grid=5001)
 
-    # 清理旧数据（可选：这里简单追加）
+    rows = []
     for i, bomb in enumerate(bombs_data_precise):
         pr = bomb['P_rel']; e = bomb['E']
         angle, speed, t_rel, t_fuz = triples[i]
-        ws.append([
-            f'FY{i+1}', round(angle, 3), round(speed, 3), round(t_rel, 3), round(t_fuz, 3),
-            round(pr[0], 3), round(pr[1], 3), round(pr[2], 3),
-            round(e[0], 3), round(e[1], 3), round(e[2], 3)
+        rows.append([
+            f'FY{i+1}', round(angle,3), round(speed,2),
+            round(float(pr[0]),3), round(float(pr[1]),3), round(float(pr[2]),3),
+            round(float(e[0]),3), round(float(e[1]),3), round(float(e[2]),3),
+            round(indiv[i],3), round(total_duration_precise,3) if i==0 else ''
         ])
 
-    # 总体遮蔽时长写入最后一行下方
-    ws.append(['总有效遮蔽并集时长(s)', round(total_duration_precise, 3)])
+    note_row = ['注：以x轴为正向，逆时针方向为正，取值0~360（度）。'] + ['']*(len(headers)-1)
 
     try:
-        wb.save(xlsx_path)
-        print("Excel 已写入:", xlsx_path)
+        with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
+            w = csv.writer(f)
+            w.writerow(headers)
+            for r in rows:
+                w.writerow(r)
+            w.writerow(note_row)
+        print('CSV 已写入:', csv_path)
     except Exception as e:
-        print("保存 Excel 失败:", e)
+        print('保存 CSV 失败:', e)
 
 
 if __name__ == "__main__":

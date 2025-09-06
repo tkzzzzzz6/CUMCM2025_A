@@ -88,7 +88,7 @@ occlusion_total = sum(mask) * dt;
 
 fprintf('【遮蔽总时长】 %.3f s\n', occlusion_total);
 if ~isempty(idxStart)
-    fprintf('【遮蔽起止】 [%.3f s, %.3f s]\n', t(idxStart(1)), t(idxEnd(end)));
+    fprintf('【遮蔽起止】 [%.3f s, %.3f s]\n', t(idxStart(1)), t(idxEnd(end)) + dt);
 else
     fprintf('当前参数下无遮蔽窗口。\n');
 end
@@ -324,7 +324,7 @@ xline(t_exp+T_eff,':','失效');
 yTop = max(R_cloud*2, max(d(~isnan(d)))*1.05);
 for i = 1:numel(idxStart)
     xs = t(idxStart(i)); xe = t(idxEnd(i));
-    patch([xs xe xe xs], [0 0 yTop yTop], [0.8 0.9 1.0], 'FaceAlpha',0.35, 'EdgeColor','none');
+    patch([xs xe+dt xe+dt xs], [0 0 yTop yTop], [0.8 0.9 1.0], 'FaceAlpha',0.35, 'EdgeColor','none');
 end
 xlabel('时间 t (s)');
 ylabel('云团中心到视线段的距离 d(t) (m)');
@@ -335,10 +335,10 @@ xlim([t0, t1]); ylim([0, yTop]);
 for i = 1:numel(idxStart)
     xs = t(idxStart(i));
     xe = t(idxEnd(i));
-    xline(xs,'--',sprintf('开始 %.3f s', xs), ...
+    xline(xs,'--',sprintf('开始 %.4f s', xs), ...
         'LabelVerticalAlignment','bottom','LabelHorizontalAlignment','left', ...
         'Color',[0 0.5 0],'LineWidth',1.0);
-    xline(xe,':',sprintf('结束 %.3f s', xe), ...
+    xline(xe+dt,':',sprintf('结束 %.4f s', xe+dt), ...
         'LabelVerticalAlignment','bottom','LabelHorizontalAlignment','left', ...
         'Color',[0.5 0 0.5],'LineWidth',1.0);
 end
@@ -367,9 +367,9 @@ if exist('idxStart','var') && exist('idxEnd','var') && ~isempty(idxStart)
         xs = t(idxStart(i));
         xe = t(idxEnd(i));
         if i == 1
-            fprintf('[%.3f s, %.3f s]', xs, xe);
+            fprintf('[%.4f s, %.4f s]', xs, xe + dt);
         else
-            fprintf(', [%.3f s, %.3f s]', xs, xe);
+            fprintf(', [%.4f s, %.4f s]', xs, xe + dt);
         end
     end
     fprintf('\n');

@@ -251,6 +251,141 @@ else
     fprintf('【遮蔽起止】 [%.3f s, %.3f s]\n', merged(1,1), merged(end,2));
 end
 
+%% ===================== 问题3：三枚烟幕弹组合优化（候选+选择） =====================
+% 说明：固定 (theta,v) 生成候选遮蔽区间，再在同一航迹上选择至多3段
+%       满足释放间隔 >= 1 s，最大化并集时长。结果写入 附件/result1.xlsx。
+
+fprintf('\n=== 问题3：开始多弹组合搜索（候选+选择） ===\n');
+
+% 外层搜索网格（可按需加密）
+theta_grid3 = linspace(-25, 25, 21);  % 相对 FY1->原点 的偏角（deg）
+v_grid3     = 120:10:140;             % 速度集合
+
+% 内层采样范围（起爆时刻与引信延迟）
+te_lo = 0.0;  te_hi = 55.0;   dt_te  = 0.2;   % 起爆时刻范围与步长
+tf_lo = 0.6;  tf_hi = 8.0;    dt_tf  = 0.2;   % 引信延迟范围与步长
+dt_eval = 0.01;                            % 候选评估时间步
+
+TopC = 60;                                  % 每条航迹保留的候选上限
+best3 = struct('total',-inf);
+
+for th = theta_grid3
+    phi = phi0 + deg2rad(th); hxy = [cos(phi), sin(phi)];
+    for v3 = v_grid3
+        % 生成候选
+        C = [];  % 每行: [a b w tr xe ye ze te tf]
+        for tei = te_lo:dt_te:te_hi
+            for tfi = tf_lo:dt_tf:tf_hi
+                tr_i = tei - tfi; if tr_i < 0, continue; end
+                xe = U0(1) + v3 * tei * hxy(1);
+                ye = U0(2) + v3 * tei * hxy(2);
+                ze = U0(3) - 0.5 * g * (tfi^2);
+                if ze < 0, continue; end
+                if use_multipoint
+                    [Jc, dets] = score_hard_multi([xe,ye,ze], tei, dt_eval, ...
+                        M0, vM_vec, R_cloud, v_sink, T_eff, pts_cyl, p_thresh, true);
+                else
+                    [Jc, dets] = score_hard([xe,ye,ze], tei, dt_eval, ...
+                        M0, vM_vec, Tpt, R_cloud, v_sink, T_eff, true);
+                end
+                if Jc <= 0, continue; end
+                [a,b,w] = get_longest_interval(dets.t, logical(dets.mask(:)));
+                if w < 0.2, continue; end
+                C = [C; a, b, w, tr_i, xe, ye, ze, tei, tfi]; %#ok<AGROW>
+            end
+        end
+        if isempty(C), continue; end
+        % 去重：同一邻域的相似区间仅保留一个（按起爆时刻聚类近似）
+        C = sortrows(C, -3);   % 按 w 降序
+        if size(C,1) > TopC, C = C(1:TopC,:); end
+        % 穷举选择最多3个不重叠区间，且释放间隔>=1s
+        N = size(C,1);
+        best_local = struct('total',-inf,'idx',[]);
+        % 单枚
+        for i = 1:N
+            total = C(i,3);
+            if total > best_local.total
+                best_local.total = total; best_local.idx = i;
+            end
+        end
+        % 两枚
+        for i = 1:N
+            for j = i+1:N
+                a1=C(i,1); b1=C(i,2); tr1=C(i,4);
+                a2=C(j,1); b2=C(j,2); tr2=C(j,4);
+                if (b1<=a2 || b2<=a1) && (abs(tr1-tr2)>=1.0)
+                    total = C(i,3)+C(j,3);
+                    if total > best_local.total
+                        best_local.total = total; best_local.idx = [i,j];
+                    end
+                end
+            end
+        end
+        % 三枚
+        for i = 1:N
+            for j = i+1:N
+                for k = j+1:N
+                    S = [i,j,k];
+                    A = C(S,1); B = C(S,2); TR = C(S,4);
+                    % 非重叠检查（任意两两）
+                    overlap = ~((B(1)<=A(2) || B(2)<=A(1)) && (B(1)<=A(3) || B(3)<=A(1)) && (B(2)<=A(3) || B(3)<=A(2)));
+                    if overlap, continue; end
+                    % 释放间隔检查（两两）
+                    if any(abs(TR(1)-TR(2))<1.0) || any(abs(TR(1)-TR(3))<1.0) || any(abs(TR(2)-TR(3))<1.0)
+                        continue;
+                    end
+                    total = sum(C(S,3));
+                    if total > best_local.total
+                        best_local.total = total; best_local.idx = S;
+                    end
+                end
+            end
+        end
+        if best_local.total > best3.total
+            best3.total = best_local.total;
+            best3.idx   = best_local.idx;
+            best3.C     = C;
+            best3.theta = th; best3.v = v3; best3.hxy = hxy;
+        end
+    end
+end
+
+if best3.total<=0 || isempty(best3.idx)
+    fprintf('问题3：未找到可行的三弹组合（可能参数过窄），请放宽采样范围。\n');
+else
+    fprintf('问题3：最优并集时长 = %.3f s（选中 %d 枚）\n', best3.total, numel(best3.idx));
+    % 组装输出到 Excel
+    S = best3.idx(:)'; C = best3.C;
+    phi_abs3 = phi0 + deg2rad(best3.theta);
+    h_abs3   = [cos(phi_abs3), sin(phi_abs3), 0];
+    heading_deg3 = mod(rad2deg(phi0) + best3.theta, 360);
+    rows = cell(numel(S), 12);
+    for ii = 1:numel(S)
+        r = C(S(ii),:);
+        tr = r(4); xe=r(5); ye=r(6); ze=r(7); tei=r(8); tfi=r(9);
+        Pr = U0 + (tr * best3.v) * h_abs3; Pr(3) = U0(3);
+        rows{ii,1}  = heading_deg3;
+        rows{ii,2}  = best3.v;
+        rows{ii,3}  = ii;                 % 编号 1..3
+        rows{ii,4}  = Pr(1); rows{ii,5} = Pr(2); rows{ii,6} = Pr(3);
+        rows{ii,7}  = xe;     rows{ii,8} = ye;     rows{ii,9} = ze;
+        rows{ii,10} = r(3);               % 有效干扰时长（主段）
+        % 保留 te, tf 便于复核（可不写入 excel）
+        rows{ii,11} = tei; rows{ii,12} = tfi;
+    end
+    headers = {'无人机运动方向(度)','无人机运动速度(m/s)','烟幕干扰弹编号', ...
+               '烟幕干扰弹投放点x(m)','烟幕干扰弹投放点y(m)','烟幕干扰弹投放点z(m)', ...
+               '烟幕干扰弹起爆点x(m)','烟幕干扰弹起爆点y(m)','烟幕干扰弹起爆点z(m)', ...
+               '有效干扰时长(s)','起爆时刻t_e(s)','引信延迟tau_f(s)'}; %#ok<NASGU>
+    outPath = fullfile('..','..','..','附件','result1.xlsx');
+    try
+        writecell([headers; rows], outPath);
+        fprintf('问题3：已写入 %s\n', outPath);
+    catch ME
+        fprintf('写入 Excel 失败：%s\n', ME.message);
+    end
+end
+
 %% ===================== 本文件内联函数（评分与优化） =====================
 
 function pts = cylinder_points()

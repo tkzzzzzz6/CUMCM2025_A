@@ -13,14 +13,14 @@ run('p2.m');  % 运行后，工作区应有 best, U0, M0, vM_vec, Tpt, R_cloud, 
 % best.theta = ...; best.v = ...; best.tr = ...; best.tf = ...; best.te = ...; best.E = [x_e,y_e,z_e];
 
 %% ============ 常量与派生量 ============
-g = 9.81;                 % 重力加速度
+g = 9.80665;                 % 重力加速度
 decoy = [0,0,0];          % 假目标
 real_center = [0,200,0];  % 真目标下底圆心
 
 % 最优参数
 theta = best.theta; vU = best.v; t_release = best.tr; t_fuze = best.tf; t_exp = best.te; Ept = best.E;
 phi0 = atan2(decoy(2)-U0(2), decoy(1)-U0(1));
-heading = [cos(phi0+theta), sin(phi0+theta), 0]; heading = heading ./ norm(heading);
+heading = [cos(phi0+deg2rad(theta)), sin(phi0+deg2rad(theta)), 0]; heading = heading ./ norm(heading);
 
 % 释放点（用于标注，可通过最优解回推）
 P_rel = U0 + (t_release * vU) * heading; P_rel(3) = U0(3);

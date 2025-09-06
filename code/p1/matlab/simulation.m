@@ -9,7 +9,7 @@
 clear; clc; close all;
 
 %% ===================== 常量与场景参数 =====================
-g        = 9.8;          % 重力加速度 (m/s^2)
+g        = 9.80665;          % 重力加速度 (m/s^2)
 v_sink   = 3.0;          % 烟幕云团起爆后下沉速度 (m/s)
 R_cloud  = 10.0;         % 有效遮蔽半径 (m)
 T_eff    = 20.0;         % 起爆后有效时间 (s)
@@ -341,6 +341,38 @@ for i = 1:numel(idxStart)
     xline(xe,':',sprintf('结束 %.3f s', xe), ...
         'LabelVerticalAlignment','bottom','LabelHorizontalAlignment','left', ...
         'Color',[0.5 0 0.5],'LineWidth',1.0);
+end
+
+%% ===================== 终端结果打印（用于表格） =====================
+% 方向角：以 +x 轴为0°，逆时针为正，范围 [0,360)
+dir_deg = mod(atan2d(heading(2), heading(1)), 360);
+smoke_id = 1;  % 单弹情形编号固定为1（如有多弹可自行修改）
+
+fprintf('\n======= 结果 =======\n');
+fprintf('无人机运动方向(度) : %.2f\n', dir_deg);
+fprintf('无人机运动速度(m/s) : %.2f\n', vU);
+fprintf('烟幕干扰弹编号 : %d\n', smoke_id);
+fprintf('烟幕干扰弹投放点的x坐标(m) : %.3f\n', P_rel(1));
+fprintf('烟幕干扰弹投放点的y坐标(m) : %.3f\n', P_rel(2));
+fprintf('烟幕干扰弹投放点的z坐标(m) : %.3f\n', P_rel(3));
+fprintf('烟幕干扰弹起爆点的x坐标(m) : %.3f\n', Ept(1));
+fprintf('烟幕干扰弹起爆点的y坐标(m) : %.3f\n', Ept(2));
+fprintf('烟幕干扰弹起爆点的z坐标(m) : %.3f\n', Ept(3));
+fprintf('有效干扰时长(s) : %.3f\n', occlusion_total);
+
+% 遮蔽起止区间
+if exist('idxStart','var') && exist('idxEnd','var') && ~isempty(idxStart)
+    fprintf('【遮蔽起止】 ');
+    for i = 1:numel(idxStart)
+        xs = t(idxStart(i));
+        xe = t(idxEnd(i));
+        if i == 1
+            fprintf('[%.3f s, %.3f s]', xs, xe);
+        else
+            fprintf(', [%.3f s, %.3f s]', xs, xe);
+        end
+    end
+    fprintf('\n');
 end
 
 %% ===================== 局部函数：点到线段距离 =====================

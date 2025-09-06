@@ -7,7 +7,7 @@
 clear; clc; close all;
 
 %% ===================== 常量与场景参数 =====================
-g        = 9.81;                 % 重力加速度 (m/s^2)
+g        = 9.80665;             % 重力加速度 (m/s^2)
 v_sink   = 3.0;                 % 云团起爆后下沉速度 (m/s)
 R_cloud  = 10.0;                % 有效遮蔽半径 (m)
 T_eff    = 20.0;                % 云团有效时长 (s)
@@ -22,7 +22,7 @@ vM_vec   = 300 * uM;            % M1 速度向量（恒定）
 phi0     = atan2(decoy(2)-U0(2), decoy(1)-U0(1));  % FY1 指向原点的基准角（此处约为 pi）
 
 % 参数取值范围（可按需调整）
-theta_lo = -pi;     theta_hi = +pi;     % 航向角偏移（相对 phi0），放宽到全向搜索
+theta_lo = -180;   theta_hi = +180;     % 航向角偏移（deg, 相对 phi0）
 v_lo     = 70;      v_hi     = 140;     % FY1 速度范围 (m/s)
 tr_lo    = 0.0;     tr_hi    = 20.0;    % 投放时刻范围 (s)（放宽上界以扩大搜索）
 tf_lo    = 0.5;     tf_hi    = 10.0;    % 引信延迟范围 (s)（放宽上界以扩大搜索）
@@ -74,7 +74,7 @@ if use_random_coarse
         v  = v_lo     + (v_hi    -v_lo    )*rand();
         tr = tr_lo    + (tr_hi   -tr_lo   )*rand();
         tf = tf_lo    + (tf_hi   -tf_lo   )*rand();
-        phi = phi0 + th; hxy = [cos(phi), sin(phi)];
+        phi = phi0 + deg2rad(th); hxy = [cos(phi), sin(phi)];
         te = tr + tf;
         xe = U0(1) + v * te * hxy(1);
         ye = U0(2) + v * te * hxy(2);
@@ -101,7 +101,7 @@ if use_random_coarse
 else
     % 规则网格扫描
     for th = theta_grid
-        phi = phi0 + th;
+        phi = phi0 + deg2rad(th);
         hxy = [cos(phi), sin(phi)];
         for v = v_grid
             for tr = tr_grid
@@ -164,7 +164,7 @@ for i = 1:min(TopK, size(cand,1))
     % 取最优 yopt 映射回物理量，并用硬判据做最终评估
     [theta1, v1, tr1, tf1] = map_vars(yopt, theta_lo,theta_hi, v_lo,v_hi, tr_lo,tr_hi, tf_lo,tf_hi);
     te1 = tr1 + tf1;
-    phi1 = phi0 + theta1; h1 = [cos(phi1), sin(phi1)];
+    phi1 = phi0 + deg2rad(theta1); h1 = [cos(phi1), sin(phi1)];
     xe1 = U0(1) + v1 * te1 * h1(1);
     ye1 = U0(2) + v1 * te1 * h1(2);
     ze1 = U0(3) - 0.5 * g * (tf1^2);
@@ -184,13 +184,30 @@ for i = 1:min(TopK, size(cand,1))
 end
 
 fprintf('=== 最优结果（硬判据） ===\n');
-fprintf('航向偏移 theta = %.4f rad（相对 FY1->原点）\n', best.theta);
+fprintf('航向偏移 theta = %.4f deg (%.4f rad)（相对 FY1->原点）\n', best.theta, deg2rad(best.theta));
 fprintf('速度 v          = %.2f m/s\n', best.v);
 fprintf('投放时刻 t_r    = %.3f s\n', best.tr);
 fprintf('引信延迟 tau_f  = %.3f s\n', best.tf);
 fprintf('起爆时刻 t_e    = %.3f s\n', best.te);
 fprintf('起爆点 E        = (%.3f, %.3f, %.3f) m\n', best.E(1), best.E(2), best.E(3));
 fprintf('最大遮蔽时长     = %.3f s\n', best.Jhard);
+
+% 终端输出：用于与模板列对应的字段
+phi_abs = phi0 + deg2rad(best.theta);
+h_abs   = [cos(phi_abs), sin(phi_abs), 0];
+P_rel   = U0 + (best.tr * best.v) * h_abs; P_rel(3) = U0(3);
+heading_deg = mod(rad2deg(phi0) + best.theta, 360);  % 以 +X 为 0°, 逆时针为正，范围 [0,360)
+
+fprintf('\n无人机运动方向(度) : %.2f\n', heading_deg);
+fprintf('无人机运动速度(m/s) : %.2f\n', best.v);
+fprintf('烟幕干扰弹编号 : %d\n', 1);
+fprintf('烟幕干扰弹投放点x(m) : %.3f\n', P_rel(1));
+fprintf('烟幕干扰弹投放点y(m) : %.3f\n', P_rel(2));
+fprintf('烟幕干扰弹投放点z(m) : %.3f\n', P_rel(3));
+fprintf('烟幕干扰弹起爆点x(m) : %.3f\n', best.E(1));
+fprintf('烟幕干扰弹起爆点y(m) : %.3f\n', best.E(2));
+fprintf('烟幕干扰弹起爆点z(m) : %.3f\n', best.E(3));
+fprintf('有效干扰时长(s) : %.3f\n', best.Jhard);
 
 %% ===================== 可视化：XY 俯视 + 距离曲线 =====================
 % 生成最优解下的轨迹并画图（用与评估一致的时间步/判据）
@@ -209,7 +226,7 @@ mask   = logical(details.mask(:));
 d      = details.d(:);
 
 % FY1 航迹（等高度直线），供近爆窗口与插图绘制
-phi = phi0 + best.theta; h = [cos(phi), sin(phi), 0];
+phi = phi0 + deg2rad(best.theta); h = [cos(phi), sin(phi), 0];
 tU = linspace(0, best.te, max(2, ceil(best.te/dt_plot)));
 U  = U0 + (tU(:) .* best.v) .* h; U(:,3)=U0(3);
 
@@ -309,7 +326,7 @@ function Jneg = objective_soft_neg(y, ...
 % 软判据目标：平滑近似 I[d<=R]*I[0<=tau<=1] 的时间积分，取负用于最小化
     [theta, v, tr, tf] = map_vars(y, theta_lo,theta_hi, v_lo,v_hi, tr_lo,tr_hi, tf_lo,tf_hi);
     te = tr + tf;
-    phi = phi0 + theta; h = [cos(phi), sin(phi)];
+    phi = phi0 + deg2rad(theta); h = [cos(phi), sin(phi)];
     E = [U0(1) + v*te*h(1), U0(2) + v*te*h(2), U0(3) - 0.5*g*(tf^2)];
     % 地表约束：起爆高度应非负，否则强惩罚
     if E(3) < 0

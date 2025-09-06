@@ -15,6 +15,7 @@ import random
 import numpy as np
 import matplotlib.pyplot as plt
 import csv
+import csv
 
 try:
     from openpyxl import load_workbook, Workbook
@@ -314,7 +315,6 @@ def format_and_output_results(best_params):
         print('写入 CSV 失败:', e)
 
     # 写入 CSV: 附件/result2.csv（按模板）
-    import csv
     proj_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
     csv_path = os.path.join(proj_root, '附件', 'result2.csv')
     os.makedirs(os.path.dirname(csv_path), exist_ok=True)

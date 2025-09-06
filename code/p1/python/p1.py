@@ -248,7 +248,7 @@ if __name__ == "__main__":
                 print(f"点 {i+1:>2d} {np.round(Ti, 2)} -> 时长: {dur:.3f} s")
 
         # 保存到文件
-        output_filename = "p1_discrete_durations.txt"
+        output_filename = "/output/p1_discrete_durations.txt"
         with open(output_filename, "w", encoding="utf-8") as f:
             f.write("点索引, X, Y, Z, 遮蔽时长(s)\n")
             # 写入所有33个点

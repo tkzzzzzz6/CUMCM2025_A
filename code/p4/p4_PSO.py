@@ -165,7 +165,7 @@ def run_pso_optimization():
     random.seed(42); np.random.seed(42)
 
     SWARM_SIZE = 90
-    ITERATIONS = 500
+    ITERATIONS = 100
     W = 0.6
     C1 = 1.6
     C2 = 1.6

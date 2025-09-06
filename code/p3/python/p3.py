@@ -1,16 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-Problem 2: 三枚烟幕弹对单导弹的协同遮蔽优化
-依赖: numpy, pandas, openpyxl
-- [最终版 - 格式化输出] 保持核心优化逻辑不变。
-- 按照用户提供的图片模板，格式化控制台输出和生成的result1.xlsx文件。
+Problem 3: 三枚烟幕弹对单导弹的协同遮蔽优化
+依赖: numpy
+- 控制台输出简洁报告（不导出 Excel）。
 """
 import math
 import numpy as np
 import time
 import random
 import copy
-import pandas as pd
+ 
 
 # -----------------------------
 # 1) 题设常量与几何/运动模型
@@ -36,8 +35,9 @@ def point_to_segment_distance(c: np.ndarray, a: np.ndarray, b: np.ndarray):
     if denom < 1e-9:
         return np.linalg.norm(c - a), 0.0
     lam = float(np.dot(c - a, ab) / denom)
-    d = float(np.linalg.norm(c - (a + max(0.0, min(1.0, lam)) * ab)))
-    return d, lam
+    lam_clamped = max(0.0, min(1.0, lam))
+    d = float(np.linalg.norm(c - (a + lam_clamped * ab)))
+    return d, lam_clamped
 
 def calculate_total_coverage_union(params, N_grid=1001, is_final_calc=False):
     angle, speed, t_r1, t_f1, dt_r2, t_f2, dt_r3, t_f3 = params
@@ -70,8 +70,8 @@ def calculate_total_coverage_union(params, N_grid=1001, is_final_calc=False):
         for bomb in bombs_data:
             if t >= bomb['t_exp']:
                 c_pos = bomb['E'] - np.array([0, 0, cloud_sink * (t - bomb['t_exp'])])
-                d, lam = point_to_segment_distance(c_pos, m_pos, T_center)
-                if d <= R and 0.0 <= lam <= 1.0:
+                d, _ = point_to_segment_distance(c_pos, m_pos, T_center)
+                if d <= R:
                     is_obscured_this_step = True
                     break
         union_mask[i] = is_obscured_this_step
@@ -128,10 +128,10 @@ def run_ga_optimization():
 
         print(f"代数 {gen+1:3d}/{GENERATIONS} | "f"本代最长: {max(fitnesses):.3f} s | "f"历史最长: {best_fitness_overall:.3f} s")
 
-        offspring = elites
+        offspring = [copy.deepcopy(e) for e in elites]
         while len(offspring) < POP_SIZE:
             p1_idx,p2_idx=random.sample(range(POP_SIZE),2); p1=population[p1_idx] if fitnesses[p1_idx]>fitnesses[p2_idx] else population[p2_idx]
-            p3_idx,p4_idx=random.sample(range(POP_SIZE),2); p2=population[p3_idx] if fitnesses[p3_idx]>fitnesses[p4_idx] else population[p3_idx]
+            p3_idx,p4_idx=random.sample(range(POP_SIZE),2); p2=population[p3_idx] if fitnesses[p3_idx]>fitnesses[p4_idx] else population[p4_idx]
             if random.random()<CXPB: c1,c2=crossover_sbx(p1,p2)
             else: c1,c2=p1,p2
             offspring.append(mutate_polynomial(c1));
@@ -146,7 +146,7 @@ def run_ga_optimization():
 # -----------------------------
 def format_and_output_results(best_params):
     """
-    对最优策略进行高精度计算，并按指定格式输出到控制台和Excel文件。
+    对最优策略进行高精度计算，并按指定格式输出到控制台。
     """
     print("\n=== 对最优策略进行高精度计算并生成报告... ===")
     
@@ -160,93 +160,22 @@ def format_and_output_results(best_params):
     t_releases = [t_r1, t_r1 + dt_r2, t_r1 + dt_r2 + dt_r3]
     t_fuzes = [t_f1, t_f2, t_f3]
 
-    # 3. 构建DataFrame
-    # 定义多级列标题
-    headers = [
-        ('无人机信息', '飞行速度(m/s)'), ('无人机信息', '飞行方向(度)'),
-        ('烟幕弹1', '投放时间(s)'), ('烟幕弹1', '引信时间(s)'),
-        ('烟幕弹1', '投放点x'), ('烟幕弹1', '投放点y'), ('烟幕弹1', '投放点z'),
-        ('烟幕弹1', '起爆点x'), ('烟幕弹1', '起爆点y'), ('烟幕弹1', '起爆点z'),
-        ('烟幕弹2', '投放时间(s)'), ('烟幕弹2', '引信时间(s)'),
-        ('烟幕弹2', '投放点x'), ('烟幕弹2', '投放点y'), ('烟幕弹2', '投放点z'),
-        ('烟幕弹2', '起爆点x'), ('烟幕弹2', '起爆点y'), ('烟幕弹2', '起爆点z'),
-        ('烟幕弹3', '投放时间(s)'), ('烟幕弹3', '引信时间(s)'),
-        ('烟幕弹3', '投放点x'), ('烟幕弹3', '投放点y'), ('烟幕弹3', '投放点z'),
-        ('烟幕弹3', '起爆点x'), ('烟幕弹3', '起爆点y'), ('烟幕弹3', '起爆点z'),
-    ]
-    columns = pd.MultiIndex.from_tuples(headers)
-    
-    # 创建数据行
-    data_row = []
-    data_row.extend([speed, angle])
+    # 3. 打印到控制台（简洁标签格式）
+    print("无人机运动方向 (度): {:.2f}".format(angle))
+    print("无人机运动速度 (m/s): {:.2f}".format(speed))
     for i in range(3):
-        p_rel = bombs_data_precise[i]['P_rel']
-        bomb_e = bombs_data_precise[i]['E']
-        data_row.extend([
-            t_releases[i], t_fuzes[i],
-            p_rel[0], p_rel[1], p_rel[2],
-            bomb_e[0], bomb_e[1], bomb_e[2]
-        ])
-    
-    df = pd.DataFrame([data_row], columns=columns)
-
-    # 4. 打印到控制台
-    print("\n" + "="*80)
-    print(" " * 28 + "无人机FY1 烟幕干扰弹投放策略")
-    print("="*80)
-    print(f" 无人机信息 ".center(24, '-'))
-    print(f"  飞行速度: {speed:.2f} m/s")
-    print(f"  飞行方向: {angle:.2f} 度")
-    print("-"*24)
-    for i in range(3):
-        print(f" 烟幕弹{i+1} ".center(50, '-'))
-        print(f"  投放时间: {t_releases[i]:.2f} s".ljust(25) + f"引信时间: {t_fuzes[i]:.2f} s")
         p = bombs_data_precise[i]['P_rel']
         e = bombs_data_precise[i]['E']
-        print(f"  投放点 (x,y,z): ({p[0]:.1f}, {p[1]:.1f}, {p[2]:.1f})")
-        print(f"  起爆点 (x,y,z): ({e[0]:.1f}, {e[1]:.1f}, {e[2]:.1f})")
-    print("="*80)
-    print(f"总有效遮蔽时长: {total_duration_precise:.4f} s")
-    print("="*80)
-
-    # 5. 保存到Excel文件
-    output_filename = 'result1.xlsx'
-    with pd.ExcelWriter(output_filename, engine='openpyxl') as writer:
-        workbook = writer.book
-        sheet_name = '投放策略'
-        if sheet_name in workbook.sheetnames:
-            del workbook[sheet_name] # 删除默认创建的空sheet
-        
-        # 写入标题
-        worksheet = workbook.create_sheet(title=sheet_name)
-        worksheet.merge_cells('A1:Z1')
-        title_cell = worksheet['A1']
-        title_cell.value = '无人机FY1 烟幕干扰弹投放策略'
-        from openpyxl.styles import Alignment, Font
-        title_cell.alignment = Alignment(horizontal='center', vertical='center')
-        title_cell.font = Font(bold=True, size=16)
-        worksheet.row_dimensions[1].height = 30
-        
-        # 写入DataFrame
-        df.to_excel(writer, sheet_name=sheet_name, startrow=2, index=False)
-        
-        # 写入总时长
-        summary_row = df.shape[0] + 5 # DataFrame写入后隔一行
-        worksheet.cell(row=summary_row, column=1, value='总有效遮蔽时长(s)').font = Font(bold=True)
-        worksheet.cell(row=summary_row, column=2, value=f"{total_duration_precise:.4f}")
-
-        # 调整格式
-        # 合并一级标题单元格
-        worksheet.merge_cells('A3:B3'); worksheet['A3'].value = '无人机信息'; worksheet['A3'].alignment = Alignment(horizontal='center')
-        worksheet.merge_cells('C3:J3'); worksheet['C3'].value = '烟幕弹1'; worksheet['C3'].alignment = Alignment(horizontal='center')
-        worksheet.merge_cells('K3:R3'); worksheet['K3'].value = '烟幕弹2'; worksheet['K3'].alignment = Alignment(horizontal='center')
-        worksheet.merge_cells('S3:Z3'); worksheet['S3'].value = '烟幕弹3'; worksheet['S3'].alignment = Alignment(horizontal='center')
-        
-        # 调整列宽
-        for col_idx, col in enumerate(worksheet.columns, 1):
-            worksheet.column_dimensions[col[0].column_letter].width = 15
-
-    print(f"\n详细策略已保存到文件: {output_filename}")
+        print("烟幕干扰弹编号: {}".format(i + 1))
+        print("  投放时间 (s): {:.2f}".format(t_releases[i]))
+        print("  引信时间 (s): {:.2f}".format(t_fuzes[i]))
+        print("  烟幕干扰弹投放点的x坐标 (m): {:.3f}".format(p[0]))
+        print("  烟幕干扰弹投放点的y坐标 (m): {:.3f}".format(p[1]))
+        print("  烟幕干扰弹投放点的z坐标 (m): {:.3f}".format(p[2]))
+        print("  烟幕干扰弹起爆点的x坐标 (m): {:.3f}".format(e[0]))
+        print("  烟幕干扰弹起爆点的y坐标 (m): {:.3f}".format(e[1]))
+        print("  烟幕干扰弹起爆点的z坐标 (m): {:.3f}".format(e[2]))
+    print("有效干扰时长 (s): {:.4f}".format(total_duration_precise))
 
 if __name__ == "__main__":
     best_params = run_ga_optimization()
